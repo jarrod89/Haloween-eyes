@@ -66,8 +66,8 @@
 //#define IRIS_PIN       A0 // Photocell or potentiometer (else auto iris)
 //#define IRIS_PIN_FLIP     // If set, reverse reading from dial/photocell
 //#define IRIS_SMOOTH       // If enabled, filter input from IRIS_PIN
-#define IRIS_MIN      140 // Clip lower analogRead() range from IRIS_PIN
-#define IRIS_MAX      260 // Clip upper "
+#define IRIS_MIN      100 //140 // Clip lower analogRead() range from IRIS_PIN
+#define IRIS_MAX      400 //260 // Clip upper "
 #define WINK_L_PIN      0 // Pin for LEFT eye wink button
 #define BLINK_PIN       1 // Pin for blink button (BOTH eyes)
 #define WINK_R_PIN      2 // Pin for RIGHT eye wink button
@@ -87,32 +87,43 @@ typedef struct {
   int32_t  duration;  // Duration of blink state (micros)
   uint32_t startTime; // Time (micros) of last state change
 } eyeBlink;
-
 struct {
-  TFT_eSPI tft; // OLED/eye[e].tft object
+  // TFT_eSPI tft;
   uint8_t     cs;      // Chip select pin
   eyeBlink    blink;   // Current blink state
 } eye[] = { // OK to comment out one of these for single-eye display:
-  TFT_eSPI(),TFT_CS,{WINK_L_PIN,NOBLINK},
-  //TFT_eSPI(),SELECT_R_PIN,{WINK_R_PIN,NOBLINK},
+  TFT_CS_L,{WINK_L_PIN,NOBLINK},
+  TFT_CS_R,{WINK_R_PIN,NOBLINK},
 };
 
 #define NUM_EYES (sizeof(eye) / sizeof(eye[0]))
 
 uint32_t fstart = 0;  // start time to improve frame rate calculation at startup
 
+TFT_eSPI tft = TFT_eSPI();
 // INITIALIZATION -- runs once at startup ----------------------------------
 
 void setup(void) {
-  uint8_t e = 0;
   
   Serial.begin(250000);
-  randomSeed(analogRead(39)); // Seed random() from floating analogue input
+  delay(1000);
+  randomSeed(analogRead(4)); // Seed random() from floating analogue input
 
-  eye[e].tft.init();
-  eye[e].tft.fillScreen(TFT_BLACK);
-  eye[e].tft.setRotation(0);
-
+  for(uint8_t e = 0; e<NUM_EYES; e++){
+    pinMode(eye[e].cs,OUTPUT);
+    digitalWrite(eye[e].cs,LOW);
+  }
+  tft.init();
+  tft.fillScreen(TFT_BLACK);
+  for(uint8_t e = 0; e<NUM_EYES; e++){
+    digitalWrite(eye[e].cs,HIGH);
+  }
+  // Mirror right eye only
+  digitalWrite(eye[1].cs,LOW);
+  tft.writecommand(0xA0); // SETREMAP
+  tft.writedata(0x76);
+  // tft.writedata(0x01);
+  digitalWrite(eye[1].cs,HIGH);
   fstart = millis()-1; // Subtract 1 to avoid divide by zero later
 }
 
@@ -140,10 +151,10 @@ void drawEye( // Renders one eye.  Inputs must be pre-clipped & valid.
   // around automatically from end of rect back to beginning, the region is
   // reset on each frame here in case of an SPI glitch.
 
-  //eye[e].tft.setAddrWindow(319-127, 0, 319, 127);
-  eye[e].tft.setAddrWindow(0, 0, 128, 128);
-  
-  //digitalWrite(eye[e].cs, LOW);                       // Chip select
+  //tft.setAddrWindow(319-127, 0, 319, 127);
+
+  digitalWrite(eye[e].cs,LOW);
+  tft.setAddrWindow(0, 0, 128, 128);
 
   // Now just issue raw 16-bit values for every pixel...
 
@@ -171,11 +182,13 @@ void drawEye( // Renders one eye.  Inputs must be pre-clipped & valid.
       }
       *(pbuffer + pixels++) = p>>8 | p<<8;
 
-      if (pixels >= BUFFER_SIZE) { yield(); eye[e].tft.pushColors((uint8_t*)pbuffer, pixels*2); pixels = 0;}
+      if (pixels >= BUFFER_SIZE) { yield(); tft.pushColors((uint8_t*)pbuffer, pixels*2); pixels = 0;}
     }
   }
 
-   if (pixels) { eye[e].tft.pushColors(pbuffer, pixels); pixels = 0;}
+   if (pixels) { tft.pushColors(pbuffer, pixels); pixels = 0;}
+  
+  digitalWrite(eye[e].cs,HIGH);
 }
 
 
@@ -210,7 +223,7 @@ void frame( // Process motion for a single frame of left or right eye
   int32_t         eyeX, eyeY;
   uint32_t        t = micros(); // Time at start of function
 
-  Serial.print((++frames * 1000) / (millis() - fstart)); Serial.println("fps");// Show frame rate
+  // Serial.print((++frames * 1000) / (millis() - fstart)); Serial.println("fps");// Show frame rate
 
   if(++eyeIndex >= NUM_EYES) eyeIndex = 0; // Cycle through eyes, 1 per call
 
